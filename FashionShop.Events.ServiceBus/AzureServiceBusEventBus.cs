@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Configuration;
 using FashionShop.Domain; // Folosim interfața din Domain
+using FashionShop.Domain.Models.Events;
 
 namespace FashionShop.Events.ServiceBus
 {
@@ -16,7 +17,7 @@ namespace FashionShop.Events.ServiceBus
         private readonly ServiceBusReceiver _receiver;
         
         // Numele cozii trebuie să fie exact cel creat în Azure Portal
-        private const string QueueName = "orders-queue";
+        private const string QueueName = "orders";
 
         public AzureServiceBusEventBus(IConfiguration configuration)
         {
@@ -30,15 +31,25 @@ namespace FashionShop.Events.ServiceBus
 
         public async ValueTask PublishAsync<T>(T @event)
         {
-            // Serializăm obiectul în JSON
-            string jsonBody = JsonSerializer.Serialize(@event);
-            
-            var message = new ServiceBusMessage(jsonBody)
+            // Decidem unde trimitem în funcție de tipul evenimentului
+            string targetQueue = @event switch
             {
-                Subject = typeof(T).Name // Etichetăm mesajul cu tipul lui
+                OrderPaidEvent => "payments", // Evenimentele de plată merg la Shipping
+                _ => "orders"                 // Comenzile noi (din API) merg la Payment
             };
 
-            await _sender.SendMessageAsync(message);
+            // Creăm un sender temporar pentru coada corectă
+            // Folosim 'await using' pentru a închide automat sender-ul după trimitere
+            await using var sender = _client.CreateSender(targetQueue);
+
+            string jsonBody = JsonSerializer.Serialize(@event);
+    
+            var message = new ServiceBusMessage(jsonBody)
+            {
+                Subject = typeof(T).Name
+            };
+
+            await sender.SendMessageAsync(message);
         }
 
         public async IAsyncEnumerable<T> SubscribeAsync<T>(CancellationToken cancellationToken)

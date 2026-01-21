@@ -1,76 +1,78 @@
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.DependencyInjection;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-using FashionShop.Domain; // Pentru IAsyncEventBus
-using FashionShop.Domain.Models.Commands;
-using FashionShop.Domain.Workflows;
+using Azure.Messaging.ServiceBus;
+using FashionShop.Domain;
+using FashionShop.Domain.Models.Events;
 using FashionShop_Hub.Data.Repositories;
-using static FashionShop.Domain.Models.Events.OrderPlacedEvent;
-using static FashionShop.Domain.Models.Events.PaymentProcessedEvent;
-using FashionShop.Domain.Models.ValueObjects;
+using System.Text.Json; // <--- Aici e schimbarea (Standard .NET)
+using System.Text;
 
 namespace FashionShop_Hub.BackgroundServices
 {
     public class PaymentWorker : BackgroundService
     {
-        private readonly IAsyncEventBus _eventBus;
+        private readonly IConfiguration _configuration;
         private readonly IServiceProvider _serviceProvider;
-        private readonly ILogger<PaymentWorker> _logger;
+        private ServiceBusProcessor _processor;
 
-        public PaymentWorker(IAsyncEventBus eventBus, IServiceProvider serviceProvider, ILogger<PaymentWorker> logger)
+        public PaymentWorker(IConfiguration configuration, IServiceProvider serviceProvider)
         {
-            _eventBus = eventBus;
+            _configuration = configuration;
             _serviceProvider = serviceProvider;
-            _logger = logger;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            // Ascultăm mesajele din Azure
-            await foreach (var orderEvent in _eventBus.SubscribeAsync<OrderPlacedSuccessfully>(stoppingToken))
-            {
-                _logger.LogInformation($"⚡ AZURE WORKER: Order {orderEvent.OrderId} received. Processing payment...");
+            var connectionString = _configuration.GetConnectionString("AzureServiceBus");
+            var client = new ServiceBusClient(connectionString);
 
-                try
+            _processor = client.CreateProcessor("orders", new ServiceBusProcessorOptions());
+
+            _processor.ProcessMessageAsync += ProcessMessageAsync;
+            _processor.ProcessErrorAsync += ProcessErrorAsync;
+
+            await _processor.StartProcessingAsync(stoppingToken);
+        }
+
+        private async Task ProcessMessageAsync(ProcessMessageEventArgs args)
+        {
+            try 
+            {
+                string body = args.Message.Body.ToString();
+                var orderEvent = JsonSerializer.Deserialize<OrderPlacedEvent>(body);
+
+                if (orderEvent != null)
                 {
                     using (var scope = _serviceProvider.CreateScope())
                     {
                         var paymentRepo = scope.ServiceProvider.GetRequiredService<PaymentRepository>();
-                        
-                        // 1. Facem comanda de plată
-                        var payCommand = new PayOrderCommand(
-                            orderEvent.OrderId.ToString(), 
-                            orderEvent.Total, 
-                            "1234123412341234", 
-                            "123");
+                        var eventBus = scope.ServiceProvider.GetRequiredService<IAsyncEventBus>();
 
-                        // 2. Executăm Workflow-ul
-                        var workflow = new ProcessPaymentWorkflow();
-                        var result = workflow.Execute(payCommand);
+                        Console.WriteLine($"💰 PAYMENT WORKER: Procesez plata pentru Comanda {orderEvent.OrderId}...");
 
-                        // 3. Salvăm și trimitem confirmarea înapoi în Azure
-                        if (result is PaymentSucceeded paymentSuccess)
-                        {
-                            paymentRepo.Save(new FashionShop.Domain.Models.Entities.Payment.ProcessedPayment(
-                                paymentSuccess.PaymentId, 
-                                paymentSuccess.OrderId, 
-                                new Price(orderEvent.Total), 
-                                paymentSuccess.ProcessedAt));
+                        paymentRepo.SavePayment(orderEvent.OrderId, orderEvent.Total);
+                        Console.WriteLine("✅ PLATA REUȘITĂ și salvată în DB!");
 
-                            _logger.LogInformation($"✅ AZURE WORKER: Payment Success! Publishing event...");
-                            
-                            await _eventBus.PublishAsync(paymentSuccess);
-                        }
+                        // Dacă aceasta linie crapă, va sări direct la 'catch' 
+                        // și va ignora 'CompleteMessageAsync' de mai jos
+                        await eventBus.PublishAsync(new OrderPaidEvent(orderEvent.OrderId, orderEvent.Total, DateTime.UtcNow));
+                
+                        Console.WriteLine("🚚 Evenimentul 'OrderPaid' a fost trimis către Shipping!");
                     }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError($"❌ Payment Error: {ex.Message}");
-                }
+
+                // ACEASTA ESTE LINIA CRITICĂ: Spune Azure-ului să ștergă mesajul
+                await args.CompleteMessageAsync(args.Message);
             }
+            catch (Exception ex)
+            {
+                // AICI vei vedea de ce se repetă mesajele
+                Console.WriteLine($"❌ EROARE CRITICĂ ÎN WORKER: {ex.Message}");
+            }
+        }
+
+        private Task ProcessErrorAsync(ProcessErrorEventArgs args)
+        {
+            Console.WriteLine($"❌ Eroare în PaymentWorker: {args.Exception.Message}");
+            return Task.CompletedTask;
         }
     }
 }

@@ -1,42 +1,39 @@
 using Microsoft.AspNetCore.Mvc;
-using FashionShop.Domain.Models.Commands;
-using FashionShop.Domain.Workflows;
-using static FashionShop.Domain.Models.Events.PaymentProcessedEvent;
 using FashionShop_Hub.Data.Repositories;
-using static FashionShop.Domain.Models.Entities.Payment;
+using System;
 
-namespace FashionShop_Hub.Controllers;
-
-[ApiController]
-[Route("api/payments")]
-public class PaymentsController : ControllerBase
+namespace FashionShop_Hub.Controllers
 {
-    private readonly PaymentRepository _repo; // <--- Injectat
-
-    public PaymentsController(PaymentRepository repo)
+    [Route("api/[controller]")]
+    [ApiController]
+    public class PaymentsController : ControllerBase
     {
-        _repo = repo;
-    }
+        private readonly PaymentRepository _repository;
 
-    [HttpPost]
-    public IActionResult PayOrder([FromBody] PayOrderCommand command)
-    {
-        var workflow = new ProcessPaymentWorkflow();
-        var result = workflow.Execute(command);
-
-        // SALVARE
-        if (result is PaymentSucceeded success)
+        public PaymentsController(PaymentRepository repository)
         {
-            // Reconstruim obiectul pentru salvare (sau modificăm workflow să returneze entity)
-            // Varianta rapidă: folosim datele din succes event
-            _repo.Save(new ProcessedPayment(success.PaymentId, success.OrderId, new FashionShop.Domain.Models.ValueObjects.Price(command.Amount), success.ProcessedAt));
+            _repository = repository;
         }
 
-        return result switch
+        [HttpPost]
+        public IActionResult CreatePayment([FromBody] PaymentRequest request)
         {
-            PaymentSucceeded s => Ok(s),
-            PaymentFailed f => BadRequest(f),
-            _ => StatusCode(500, "Error")
-        };
+            try
+            {
+                // AICI ERA EROAREA:
+                // Înainte apelai .Save(), acum apelăm metoda corectă .SavePayment()
+                _repository.SavePayment(request.OrderId, request.Amount);
+
+                return Ok(new { Message = "Plata a fost înregistrată cu succes!" });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { Error = ex.Message });
+            }
+        }
     }
+
+    // Definim un model simplu pentru datele care vin din Postman/Frontend
+    // (Poți să-l muți într-un fișier separat dacă vrei, dar merge și aici)
+    public record PaymentRequest(Guid OrderId, decimal Amount);
 }

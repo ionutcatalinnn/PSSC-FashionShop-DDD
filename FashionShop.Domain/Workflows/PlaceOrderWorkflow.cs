@@ -1,51 +1,48 @@
-using System.Linq; // <--- Necesar pentru .Select() si .ToList()
+using System;
+using System.Linq;
 using System.Collections.Generic;
 using FashionShop.Domain.Models.Commands;
-using FashionShop.Domain.Models.Events;
+using FashionShop.Domain.Models.Events; // Aici e OrderPlacedEvent
 using FashionShop.Domain.Operations;
 using FashionShop.Domain.Repositories;
-using FashionShop.Domain.Models.Entities; // Asigura-te ca ai acest namespace
-using static FashionShop.Domain.Models.Entities.Order;
-using static FashionShop.Domain.Models.Events.OrderPlacedEvent;
+using FashionShop.Domain.Models.Entities; 
 
 namespace FashionShop.Domain.Workflows
 {
     public class PlaceOrderWorkflow
     {
-        public IOrderPlacedEvent Execute(PlaceOrderCommand command, IOrderRepository repository)
+        // MODIFICARE: Returnăm 'OrderPlacedEvent' (concret), nu 'IOrderPlacedEvent'
+        public OrderPlacedEvent Execute(PlaceOrderCommand command, IOrderRepository repository)
         {
-            // 1. Convertim (Mapăm) liniile de la INPUT la DOMAIN
-            // Aici era eroarea: transformăm OrderLineInput -> UnvalidatedOrderLine
+            // 1. Convertim inputul în liniile de domeniu (Unvalidated)
             var domainLines = command.Lines
-                .Select(line => new UnvalidatedOrderLine(line.ProductCode, line.Quantity))
+                .Select(line => new Order.UnvalidatedOrderLine(line.ProductCode, line.Quantity, line.Price))
                 .ToList();
 
-            // 2. Creăm starea inițială cu lista convertită
-            IOrder order = new UnvalidatedOrder(
+            // 2. Creăm starea inițială
+            Order.IOrder order = new Order.UnvalidatedOrder(
                 domainLines, 
                 command.CustomerName, 
                 command.Address
             );
 
-            // 3. Executăm pipeline-ul de operații
-            
-            // Pas A: Validare
+            // 3. Executăm pipeline-ul
             order = new ValidateOrderOperation().Transform(order);
-            
-            // Pas B: Calculare Preț
             order = new CalculateOrderOperation().Transform(order);
-            
-            // Pas C: Plasare (Generare ID + Timestamp)
             order = new PlaceOrderFinalOperation().Transform(order);
 
-            // 4. Persistență (Salvare în Bază de Date)
-            if (order is PlacedOrder placedOrder)
+            // 4. Verificăm rezultatul și salvăm
+            if (order is Order.PlacedOrder placedOrder)
             {
+                // Salvăm în baza de date
                 repository.Save(placedOrder);
+
+                // Returnăm evenimentul concret
+                return new OrderPlacedEvent(placedOrder.OrderId, placedOrder.Total, placedOrder.PlacedAt);
             }
 
-            // 5. Returnăm evenimentul
-            return order.ToEvent();
+            // Dacă ceva a eșuat
+            throw new Exception("Workflow failed: Order could not be placed.");
         }
     }
 }

@@ -1,17 +1,19 @@
 using Microsoft.AspNetCore.Mvc;
-using System.Threading.Tasks;
-using FashionShop.Domain; // Pentru IAsyncEventBus
 using FashionShop.Domain.Models.Commands;
 using FashionShop.Domain.Workflows;
 using FashionShop.Domain.Repositories;
-using static FashionShop.Domain.Models.Events.OrderPlacedEvent;
+using FashionShop.Domain; // Pentru IAsyncEventBus
+using FashionShop.Domain.Models.Events; // <--- Aici este OrderPlacedEvent acum
 
 namespace FashionShop_Hub.Controllers
 {
+    [Route("api/[controller]")]
     [ApiController]
-    [Route("api/async-orders")]
     public class AsyncOrdersController : ControllerBase
     {
+        // Workflow-ul nu mai este injectat prin DI, îl instanțiem direct sau îl înregistrăm simplu
+        // Dar pentru simplitate acum, îl folosim direct.
+        private readonly PlaceOrderWorkflow _workflow; 
         private readonly IOrderRepository _repository;
         private readonly IAsyncEventBus _eventBus;
 
@@ -19,26 +21,34 @@ namespace FashionShop_Hub.Controllers
         {
             _repository = repository;
             _eventBus = eventBus;
+            _workflow = new PlaceOrderWorkflow();
         }
 
         [HttpPost]
-        public async Task<IActionResult> PlaceOrderAsync([FromBody] PlaceOrderCommand command)
+        public async Task<IActionResult> CreateOrder([FromBody] PlaceOrderCommand command)
         {
-            var workflow = new PlaceOrderWorkflow();
-            var result = workflow.Execute(command, _repository);
-
-            if (result is OrderPlacedSuccessfully successEvent)
+            try
             {
-                // Trimitem în Azure Service Bus
-                await _eventBus.PublishAsync(successEvent);
+                // 1. Executăm Workflow-ul
+                // Acum returnează DIRECT "OrderPlacedEvent". Nu mai trebuie să verifici "is OrderPlacedSuccessfully".
+                var eventResult = _workflow.Execute(command, _repository);
 
-                return Accepted(new { 
-                    Message = "Comanda a fost trimisă în Azure Queue!", 
-                    OrderId = successEvent.OrderId 
+                // 2. Trimitem evenimentul către Azure Service Bus
+                await _eventBus.PublishAsync(eventResult);
+
+                // 3. Returnăm succes
+                return Ok(new 
+                { 
+                    Message = "Comanda a fost procesată și trimisă spre livrare!", 
+                    OrderId = eventResult.OrderId,
+                    Total = eventResult.Total
                 });
             }
-
-            return BadRequest("Comanda invalidă.");
+            catch (Exception ex)
+            {
+                // Dacă workflow-ul eșuează (validare, stoc, etc.), va arunca o eroare pe care o prindem aici
+                return BadRequest(new { Error = ex.Message });
+            }
         }
     }
 }

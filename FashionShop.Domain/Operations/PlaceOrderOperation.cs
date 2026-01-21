@@ -2,101 +2,85 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using FashionShop.Domain.Models.Entities;
-using static FashionShop.Domain.Models.Entities.Order;
+// ATENȚIE: Am scos 'using static ... Order' ca să te oblig să folosești prefixul 'Order.'
+// Așa nu mai apar confuzii.
 
 namespace FashionShop.Domain.Operations
 {
-    // Clasa de bază pentru operații (State Machine)
-    public abstract class PlaceOrderOperation : DomainOperation<IOrder, object, IOrder>
+    // State Machine
+    public abstract class PlaceOrderOperation : DomainOperation<Order.IOrder, object, Order.IOrder>
     {
-        public override IOrder Transform(IOrder order, object? state = null) =>
+        public override Order.IOrder Transform(Order.IOrder order, object? state = null) =>
             order switch
             {
-                UnvalidatedOrder u => OnUnvalidated(u),
-                ValidatedOrder v => OnValidated(v),
-                CalculatedOrder c => OnCalculated(c),
-                PlacedOrder p => OnPlaced(p),
-                InvalidOrder i => OnInvalid(i),
+                Order.UnvalidatedOrder u => OnUnvalidated(u),
+                Order.ValidatedOrder v => OnValidated(v),
+                Order.CalculatedOrder c => OnCalculated(c),
+                Order.PlacedOrder p => OnPlaced(p),
+                Order.InvalidOrder i => OnInvalid(i),
                 _ => order
             };
 
-        protected virtual IOrder OnUnvalidated(UnvalidatedOrder order) => order;
-        protected virtual IOrder OnValidated(ValidatedOrder order) => order;
-        protected virtual IOrder OnCalculated(CalculatedOrder order) => order;
-        protected virtual IOrder OnPlaced(PlacedOrder order) => order;
-        protected virtual IOrder OnInvalid(InvalidOrder order) => order;
+        protected virtual Order.IOrder OnUnvalidated(Order.UnvalidatedOrder order) => order;
+        protected virtual Order.IOrder OnValidated(Order.ValidatedOrder order) => order;
+        protected virtual Order.IOrder OnCalculated(Order.CalculatedOrder order) => order;
+        protected virtual Order.IOrder OnPlaced(Order.PlacedOrder order) => order;
+        protected virtual Order.IOrder OnInvalid(Order.InvalidOrder order) => order;
     }
 
-    // 1. Validarea datelor
+    // 1. Validarea
     public class ValidateOrderOperation : PlaceOrderOperation
     {
-        protected override IOrder OnUnvalidated(UnvalidatedOrder order)
+        protected override Order.IOrder OnUnvalidated(Order.UnvalidatedOrder order)
         {
-            var validatedLines = new List<ValidatedOrderLine>();
+            var validatedLines = new List<Order.ValidatedOrderLine>(); // <--- Prefix explicit Order.
 
             foreach (var line in order.Lines)
             {
                 if (line.Quantity <= 0)
-                    return new InvalidOrder($"Invalid quantity for {line.ProductCode}");
+                    return new Order.InvalidOrder($"Invalid quantity for {line.ProductCode}");
 
-                // Păstrăm logica ta de creare a liniilor
-                validatedLines.Add(new ValidatedOrderLine(line.ProductCode, line.Quantity));
+                // Aici folosim explicit Order.ValidatedOrderLine
+                validatedLines.Add(new Order.ValidatedOrderLine(line.ProductCode, line.Quantity, line.Price));
             }
 
-            // --- MODIFICARE AICI ---
-            // Pasăm CustomerName și Address din 'order' (Unvalidated) către 'ValidatedOrder'
-            return new ValidatedOrder(
-                validatedLines, 
-                order.CustomerName, 
-                order.Address
-            );
+            return new Order.ValidatedOrder(validatedLines, order.CustomerName, order.Address);
         }
     }
 
-    // 2. Calculul Prețului
+    // 2. Calculul
     public class CalculateOrderOperation : PlaceOrderOperation
     {
-        protected override IOrder OnValidated(ValidatedOrder order)
+        protected override Order.IOrder OnValidated(Order.ValidatedOrder order)
         {
-            var calculatedLines = new List<CalculatedOrderLine>();
+            var calculatedLines = new List<Order.CalculatedOrderLine>();
             decimal totalOrder = 0;
 
             foreach (var line in order.Lines)
             {
-                // Simulare preț din baza de date (hardcodat pentru demo)
-                decimal price = 50m; 
+                decimal price = line.Price;
                 decimal lineTotal = price * line.Quantity;
 
-                calculatedLines.Add(new CalculatedOrderLine(line.ProductCode, line.Quantity, price, lineTotal));
+                calculatedLines.Add(new Order.CalculatedOrderLine(line.ProductCode, line.Quantity, price, lineTotal));
                 totalOrder += lineTotal;
             }
 
-            // --- MODIFICARE AICI ---
-            // Pasăm CustomerName și Address din 'order' (Validated) către 'CalculatedOrder'
-            return new CalculatedOrder(
-                calculatedLines, 
-                totalOrder, 
-                order.CustomerName, 
-                order.Address
-            );
+            return new Order.CalculatedOrder(calculatedLines, totalOrder, order.CustomerName, order.Address);
         }
     }
 
-    // 3. Plasarea finală (Generarea ID-ului)
+    // 3. Plasarea
     public class PlaceOrderFinalOperation : PlaceOrderOperation
     {
-        protected override IOrder OnCalculated(CalculatedOrder order)
+        protected override Order.IOrder OnCalculated(Order.CalculatedOrder order)
         {
-            // --- MODIFICARE AICI ---
-            // Pasăm CustomerName și Address din 'order' (Calculated) către 'PlacedOrder'
-            // Acestea vor fi folosite ulterior la salvarea în Repository
-            return new PlacedOrder(
+            return new Order.PlacedOrder(
                 OrderId: Guid.NewGuid(),
                 Lines: order.Lines, 
                 Total: order.Total, 
                 PlacedAt: DateTime.UtcNow,
-                CustomerName: order.CustomerName, // <--- NOU
-                Address: order.Address            // <--- NOU
+                CustomerName: order.CustomerName,
+                Address: order.Address
             );
         }
     }

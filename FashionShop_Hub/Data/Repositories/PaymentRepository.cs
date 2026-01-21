@@ -1,24 +1,40 @@
-using FashionShop_Hub.Data.Models;
-using static FashionShop.Domain.Models.Entities.Payment;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Configuration;
+using System;
 
 namespace FashionShop_Hub.Data.Repositories
 {
     public class PaymentRepository
     {
-        private readonly FashionDbContext _ctx;
-        public PaymentRepository(FashionDbContext ctx) => _ctx = ctx;
+        private readonly string _connectionString;
 
-        public void Save(ProcessedPayment payment)
+        public PaymentRepository(IConfiguration configuration)
         {
-            _ctx.Payments.Add(new PaymentDto
+            // Preluăm connection string-ul din appsettings.json
+            _connectionString = configuration.GetConnectionString("DefaultConnection");
+        }
+
+        // --- ACEASTA ESTE METODA CARE LIPSEA ---
+        public void SavePayment(Guid orderId, decimal amount)
+        {
+            using (var connection = new SqlConnection(_connectionString))
             {
-                PaymentId = payment.PaymentId,
-                OrderId = payment.OrderId,
-                Amount = payment.Amount.Value,
-                ProcessedAt = payment.ProcessedAt,
-                Status = "Processed"
-            });
-            _ctx.SaveChanges();
+                connection.Open();
+        
+                // Asigură-te că numele de aici (PaymentDate) coincide cu cel din SQL
+                var query = @"INSERT INTO Payments (PaymentId, OrderId, Amount, PaymentDate) 
+                      VALUES (@PaymentId, @OrderId, @Amount, @PaymentDate)";
+
+                using (var command = new SqlCommand(query, connection))
+                {
+                    command.Parameters.AddWithValue("@PaymentId", Guid.NewGuid());
+                    command.Parameters.AddWithValue("@OrderId", orderId);
+                    command.Parameters.AddWithValue("@Amount", amount);
+                    command.Parameters.AddWithValue("@PaymentDate", DateTime.UtcNow);
+
+                    command.ExecuteNonQuery();
+                }
+            }
         }
     }
 }

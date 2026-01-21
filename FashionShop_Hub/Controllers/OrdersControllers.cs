@@ -1,38 +1,58 @@
 using Microsoft.AspNetCore.Mvc;
 using FashionShop.Domain.Models.Commands;
 using FashionShop.Domain.Workflows;
-using FashionShop.Domain.Repositories; // <--- using nou
-using static FashionShop.Domain.Models.Events.OrderPlacedEvent;
+using FashionShop.Domain.Repositories;
+using FashionShop.Domain.Models.Events; // <--- Aici este definit OrderPlacedEvent
+using FashionShop.Domain; // Pentru IAsyncEventBus
 
-namespace FashionShop_Hub.Controllers;
-
-[ApiController]
-[Route("api/orders")]
-public class OrdersController : ControllerBase
+namespace FashionShop_Hub.Controllers
 {
-    private readonly ILogger<OrdersController> _logger;
-    private readonly IOrderRepository _repository; // <--- Dependința
-
-    // Constructorul primește repository-ul (Dependency Injection)
-    public OrdersController(ILogger<OrdersController> logger, IOrderRepository repository)
+    [Route("api/[controller]")]
+    [ApiController]
+    public class OrdersController : ControllerBase
     {
-        _logger = logger;
-        _repository = repository;
-    }
+        private readonly IOrderRepository _repository;
+        private readonly IAsyncEventBus _eventBus;
 
-    [HttpPost]
-    public IActionResult PlaceOrder([FromBody] PlaceOrderCommand command)
-    {
-        var workflow = new PlaceOrderWorkflow();
-        
-        // Pasăm repository-ul către workflow
-        var result = workflow.Execute(command, _repository);
-
-        return result switch
+        public OrdersController(IOrderRepository repository, IAsyncEventBus eventBus)
         {
-            OrderPlacedSuccessfully success => Ok(success),
-            OrderPlacementFailed failed => BadRequest(failed),
-            _ => StatusCode(500, "Unexpected error")
-        };
+            _repository = repository;
+            _eventBus = eventBus;
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> CreateOrder([FromBody] PlaceOrderCommand command)
+        {
+            try
+            {
+                // Instanțiem workflow-ul
+                var workflow = new PlaceOrderWorkflow();
+
+                // 1. Executăm Workflow-ul
+                // ACUM returnează direct 'OrderPlacedEvent', nu mai trebuie să verifici tipul
+                OrderPlacedEvent orderEvent = workflow.Execute(command, _repository);
+
+                // 2. Trimitem evenimentul către Azure Service Bus
+                // (Dacă folosești Async, altfel poți comenta linia asta)
+                if (_eventBus != null)
+                {
+                    await _eventBus.PublishAsync(orderEvent);
+                }
+
+                // 3. Returnăm succes cu datele din eveniment
+                return Ok(new 
+                { 
+                    Message = "Comanda a fost plasată cu succes!", 
+                    OrderId = orderEvent.OrderId,
+                    Total = orderEvent.Total,
+                    Date = orderEvent.PlacedAt
+                });
+            }
+            catch (Exception ex)
+            {
+                // Dacă workflow-ul dă eroare (validare etc.), returnăm 400 Bad Request
+                return BadRequest(new { Error = ex.Message });
+            }
+        }
     }
 }

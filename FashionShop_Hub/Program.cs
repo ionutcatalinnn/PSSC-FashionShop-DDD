@@ -46,10 +46,10 @@ using (var scope = app.Services.CreateScope())
         
         // A. Șterge baza veche (Activează asta doar acum, apoi comentează-o)
         // Asta rezolvă eroarea "Invalid object name 'Orders'"
-        context.Database.EnsureDeleted(); 
+       // context.Database.EnsureDeleted(); 
         
         // B. Creează baza nouă cu TOATE tabelele (Orders, Payments, Shippings)
-        context.Database.EnsureCreated();
+      //  context.Database.EnsureCreated();
         
         var logger = services.GetRequiredService<ILogger<Program>>();
         logger.LogInformation("✅ Baza de date a fost recreată cu succes!");
