@@ -10,10 +10,12 @@ namespace FashionShop_Hub.Data.Models
         public decimal TotalAmount { get; set; }
         public DateTime PlacedAt { get; set; }
         
-        // Modificare: Adăugăm = string.Empty;
         public string Status { get; set; } = string.Empty;
-        
-        // Modificare: Adăugăm = string.Empty;
         public string OrderLinesJson { get; set; } = string.Empty;
+
+        // --- AM ADAUGAT ACESTE DOUA LINII ---
+        // Acum baza de date va avea coloane pentru ele
+        public string CustomerName { get; set; } = string.Empty;
+        public string Address { get; set; } = string.Empty;
     }
 }

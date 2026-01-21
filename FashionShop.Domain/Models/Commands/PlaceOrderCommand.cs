@@ -1,8 +1,18 @@
 using System.Collections.Generic;
-using FashionShop.Domain.Models.Entities;
 
 namespace FashionShop.Domain.Models.Commands
 {
+    // 1. Comanda principală
     public record PlaceOrderCommand(
-        IReadOnlyCollection<UnvalidatedOrderLine> Lines);
+        List<OrderLineInput> Lines, 
+        string CustomerName, 
+        string Address
+    );
+
+    // 2. AICI DEFINIM CE ÎNSEAMNĂ "OrderLineInput" (Linia care lipsea)
+    public record OrderLineInput(
+        string ProductCode, 
+        int Quantity,
+        decimal Price
+    );
 }

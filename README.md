@@ -3,8 +3,10 @@
 
  Echipa
 
-Boghian Cătălin -Ionuț
+Boghian Cătălin-Ionuț
+
 Orza Daniel
+
 Truț-Jorj Caius
 
 

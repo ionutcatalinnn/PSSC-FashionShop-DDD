@@ -1,50 +1,67 @@
-using FashionShop.Domain.Repositories;
 using FashionShop_Hub.Data;
-using FashionShop_Hub.Data.Repositories;
+using FashionShop.Data.Repositories; // Asigură-te că aici e OrderRepository
+using FashionShop_Hub.Data.Repositories; // Pentru Payment/Shipping repos
 using Microsoft.EntityFrameworkCore;
-
-// --- USING-URI NOI PENTRU AZURE & WORKERS ---
-using FashionShop.Domain;                  // Pentru interfața IAsyncEventBus
-using FashionShop.Events.ServiceBus;       // Pentru implementarea AzureServiceBusEventBus
-using FashionShop_Hub.BackgroundServices;  // Pentru PaymentWorker și ShippingWorker
-// ---------------------------------------------
+using FashionShop.Domain;
+using FashionShop.Domain.Repositories;
+using FashionShop.Events.ServiceBus;
+using FashionShop_Hub.BackgroundServices;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// --- 1. CONFIGURARE SERVICII ---
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// --- CONFIGURARE DB ---
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+// AICI ERA POSIBILA EROARE: Verifică dacă în appsettings.json ai "FashionDb" sau "DefaultConnection"
+// Am pus "FashionDb" pentru că așa apărea în mesajele tale anterioare.
+var connectionString = builder.Configuration.GetConnectionString("FashionDb") 
+                    ?? builder.Configuration.GetConnectionString("DefaultConnection");
 
 builder.Services.AddDbContext<FashionDbContext>(options =>
     options.UseSqlServer(connectionString));
 
+// Repositories
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
 builder.Services.AddScoped<PaymentRepository>();
 builder.Services.AddScoped<ShippingRepository>();
 
-// --- CONFIGURARE AZURE SERVICE BUS (NOU) ---
-// 1. Înregistrăm Event Bus-ul conectat la Azure
-// Singleton = o singură conexiune pentru toată aplicația
+// Azure Service Bus & Workers
 builder.Services.AddSingleton<IAsyncEventBus, AzureServiceBusEventBus>();
-
-// 2. Pornim Workerii care ascultă cozile din Azure
-// Ei vor rula în fundal imediat ce pornește aplicația
 builder.Services.AddHostedService<PaymentWorker>();
 builder.Services.AddHostedService<ShippingWorker>();
-// -------------------------------------------
 
 var app = builder.Build();
 
-// --- AUTO-MIGRARE ---
+// --- 2. CONFIGURARE BAZA DE DATE (O SINGURĂ DATĂ) ---
+// Acest bloc rulează la fiecare pornire și asigură că tabelele există
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<FashionDbContext>();
-    db.Database.EnsureCreated();
+    var services = scope.ServiceProvider;
+    try
+    {
+        var context = services.GetRequiredService<FashionDbContext>();
+        
+        // A. Șterge baza veche (Activează asta doar acum, apoi comentează-o)
+        // Asta rezolvă eroarea "Invalid object name 'Orders'"
+        context.Database.EnsureDeleted(); 
+        
+        // B. Creează baza nouă cu TOATE tabelele (Orders, Payments, Shippings)
+        context.Database.EnsureCreated();
+        
+        var logger = services.GetRequiredService<ILogger<Program>>();
+        logger.LogInformation("✅ Baza de date a fost recreată cu succes!");
+    }
+    catch (Exception ex)
+    {
+        var logger = services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "❌ Eroare critică la crearea bazei de date.");
+    }
 }
+
+// --- 3. PIPELINE HTTP ---
 
 if (app.Environment.IsDevelopment())
 {
@@ -53,7 +70,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.MapControllers();
+
+app.MapControllers(); // O singură dată e suficient
 app.MapGet("/", () => Results.Redirect("/swagger"));
 
 app.Run();

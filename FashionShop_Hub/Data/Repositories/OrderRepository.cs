@@ -1,13 +1,14 @@
 using System.Text.Json;
-using FashionShop.Domain.Models.Entities;
+using FashionShop_Hub.Data;          // <--- AICI ERA PROBLEMA (Lipseal acest using)
+using FashionShop_Hub.Data.Models;  // Aici e OrderDto
 using FashionShop.Domain.Repositories;
-using FashionShop_Hub.Data.Models;
 using static FashionShop.Domain.Models.Entities.Order;
 
-namespace FashionShop_Hub.Data.Repositories
+namespace FashionShop.Data.Repositories
 {
     public class OrderRepository : IOrderRepository
     {
+        // Acum va recunoaste clasa FashionDbContext
         private readonly FashionDbContext _dbContext;
 
         public OrderRepository(FashionDbContext dbContext)
@@ -17,20 +18,22 @@ namespace FashionShop_Hub.Data.Repositories
 
         public void Save(PlacedOrder order)
         {
-            // Convertim din Domain Entity (PlacedOrder) în Database Entity (OrderDto)
-            var orderDto = new OrderDto
+            var orderEntity = new OrderDto
             {
                 OrderId = order.OrderId,
                 TotalAmount = order.Total,
                 PlacedAt = order.PlacedAt,
                 Status = "Placed",
                 
-                // Serializăm liniile ca JSON pentru simplitate
-                // Aici nu avem nevoie de .Value pentru că ProductCode este deja string
+                // Salvam datele clientului
+                CustomerName = order.CustomerName,
+                Address = order.Address,
+
+                // Serializam liniile
                 OrderLinesJson = JsonSerializer.Serialize(order.Lines)
             };
 
-            _dbContext.Orders.Add(orderDto);
+            _dbContext.Orders.Add(orderEntity);
             _dbContext.SaveChanges();
         }
     }

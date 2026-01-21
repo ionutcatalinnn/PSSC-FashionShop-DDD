@@ -39,10 +39,17 @@ namespace FashionShop.Domain.Operations
                 if (line.Quantity <= 0)
                     return new InvalidOrder($"Invalid quantity for {line.ProductCode}");
 
+                // Păstrăm logica ta de creare a liniilor
                 validatedLines.Add(new ValidatedOrderLine(line.ProductCode, line.Quantity));
             }
 
-            return new ValidatedOrder(validatedLines);
+            // --- MODIFICARE AICI ---
+            // Pasăm CustomerName și Address din 'order' (Unvalidated) către 'ValidatedOrder'
+            return new ValidatedOrder(
+                validatedLines, 
+                order.CustomerName, 
+                order.Address
+            );
         }
     }
 
@@ -57,14 +64,21 @@ namespace FashionShop.Domain.Operations
             foreach (var line in order.Lines)
             {
                 // Simulare preț din baza de date (hardcodat pentru demo)
-                decimal price = 50m; // Orice produs costă 50 lei
+                decimal price = 50m; 
                 decimal lineTotal = price * line.Quantity;
 
                 calculatedLines.Add(new CalculatedOrderLine(line.ProductCode, line.Quantity, price, lineTotal));
                 totalOrder += lineTotal;
             }
 
-            return new CalculatedOrder(calculatedLines, totalOrder);
+            // --- MODIFICARE AICI ---
+            // Pasăm CustomerName și Address din 'order' (Validated) către 'CalculatedOrder'
+            return new CalculatedOrder(
+                calculatedLines, 
+                totalOrder, 
+                order.CustomerName, 
+                order.Address
+            );
         }
     }
 
@@ -73,12 +87,16 @@ namespace FashionShop.Domain.Operations
     {
         protected override IOrder OnCalculated(CalculatedOrder order)
         {
-            // Aici generăm ID-ul unic al comenzii și adăugăm Timestamp-ul
+            // --- MODIFICARE AICI ---
+            // Pasăm CustomerName și Address din 'order' (Calculated) către 'PlacedOrder'
+            // Acestea vor fi folosite ulterior la salvarea în Repository
             return new PlacedOrder(
-                OrderId: Guid.NewGuid(),      // <--- AICI se generează ID-ul lipsă
+                OrderId: Guid.NewGuid(),
                 Lines: order.Lines, 
                 Total: order.Total, 
-                PlacedAt: DateTime.UtcNow
+                PlacedAt: DateTime.UtcNow,
+                CustomerName: order.CustomerName, // <--- NOU
+                Address: order.Address            // <--- NOU
             );
         }
     }
